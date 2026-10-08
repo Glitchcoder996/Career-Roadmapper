@@ -255,6 +255,13 @@ function confetti() {
 function generate() {
   var jt = document.getElementById('jobInput').value.trim();
   if (!jt) { toast('Please enter a job title'); return; }
+  
+  // If user is searching for a completely different role, reset their progress
+  if (jobTitle && jobTitle !== jt) {
+    known = [];
+    done = [];
+    updateProgress();
+  }
   jobTitle = jt;
 
   document.getElementById('loader').classList.remove('hidden');
