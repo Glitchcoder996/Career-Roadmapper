@@ -110,7 +110,7 @@ Respond with ONLY valid JSON in this EXACT structure (no markdown, no explanatio
 """
     try:
         response = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-3.7-flash",
             contents=prompt
         )
         cleaned  = clean_json(response.text)
@@ -164,7 +164,7 @@ Give them hyper-specific, actionable advice. Respond with ONLY valid JSON:
 """
     try:
         response = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-3.7-flash",
             contents=prompt
         )
         cleaned  = clean_json(response.text)
