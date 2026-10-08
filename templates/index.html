@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Career Roadmapper</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    * { font-family: 'Inter', sans-serif; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 9px; }
+    #network {
+      width: 100%; height: 100%;
+      background: radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, #0f172a 60%, #0a0f1e 100%);
+    }
+    .grad { background: linear-gradient(135deg,#38bdf8,#818cf8); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.8s linear infinite; }
+    @keyframes bounce-in { 0%{transform:translateY(20px);opacity:0} 100%{transform:translateY(0);opacity:1} }
+    .bounce-in { animation: bounce-in .3s ease-out forwards; }
+    @keyframes confetti-fall { 0%{transform:translateY(-10px) rotate(0deg);opacity:1} 100%{transform:translateY(100vh) rotate(720deg);opacity:0} }
+    .confetti-piece { position:fixed; animation: confetti-fall 3s ease-in forwards; pointer-events:none; z-index:9999; border-radius:2px; }
+    .tab-active { color:#38bdf8; border-bottom:2px solid #38bdf8; }
+    .tab-inactive { color:#64748b; border-bottom:2px solid transparent; }
+  </style>
+</head>
+<body class="bg-slate-950 text-white h-screen flex flex-col overflow-hidden">
+
+<!-- HEADER -->
+<header class="flex-shrink-0 bg-slate-950 border-b border-slate-800 px-4 py-3">
+  <div class="flex items-center justify-between mb-3">
+    <div class="flex items-center gap-2">
+      <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-sky-500 to-violet-600 flex items-center justify-center text-xs font-black">CR</div>
+      <span class="font-bold text-sm grad">Career Roadmapper</span>
+      <span class="text-slate-500 text-xs hidden sm:block">— Reverse-engineer your dream job</span>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="openCompare()" class="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:border-violet-500 hover:text-violet-400 text-slate-400 transition">Compare Roles</button>
+      <button onclick="exportPNG()" class="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:border-sky-500 hover:text-sky-400 text-slate-400 transition">Export PNG</button>
+      <button onclick="shareMap()" class="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:border-emerald-500 hover:text-emerald-400 text-slate-400 transition">Share Link</button>
+    </div>
+  </div>
+  <div class="flex flex-wrap gap-2 items-end">
+    <div class="flex flex-col gap-1">
+      <label class="text-xs text-slate-500">Dream Role</label>
+      <input id="jobInput" type="text" placeholder='e.g. "Full Stack Dev at a climate startup"'
+        class="bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-lg text-sm w-72 focus:outline-none focus:ring-2 focus:ring-sky-500"/>
+    </div>
+    <div class="flex flex-col gap-1">
+      <label class="text-xs text-slate-500">Background</label>
+      <input id="bgInput" type="text" placeholder="e.g. 2nd year CS student"
+        class="bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-lg text-sm w-44 focus:outline-none focus:ring-2 focus:ring-sky-500"/>
+    </div>
+    <div class="flex flex-col gap-1">
+      <label class="text-xs text-slate-500">Timeframe</label>
+      <select id="tfInput" class="bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+        <option>3 months</option>
+        <option selected>6 months</option>
+        <option>1 year</option>
+        <option>2 years</option>
+      </select>
+    </div>
+    <div class="flex flex-col gap-1">
+      <label class="text-xs text-slate-500">Hrs/week</label>
+      <input id="hrsInput" type="number" value="10" min="1" max="80"
+        class="bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-lg text-sm w-20 focus:outline-none focus:ring-2 focus:ring-sky-500"/>
+    </div>
+    <button id="genBtn" onclick="generate()"
+      class="px-5 py-1.5 rounded-lg text-sm font-semibold text-white transition"
+      style="background: linear-gradient(135deg,#0ea5e9,#7c3aed); box-shadow: 0 4px 15px rgba(124,58,237,0.3)">
+      Generate Roadmap
+    </button>
+    <div id="progressWrap" class="hidden ml-auto flex items-center gap-3 text-xs text-slate-400">
+      <span id="progText">0 / 0 completed</span>
+      <div class="w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+        <div id="progBar" class="h-full rounded-full transition-all" style="width:0%; background: linear-gradient(90deg,#0ea5e9,#22c55e)"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main class="flex-1 flex overflow-hidden relative">
+
+  <!-- Network -->
+  <div id="network" class="flex-1 relative">
+    <!-- Empty state -->
+    <div id="emptyState" class="absolute inset-0 flex flex-col items-center justify-center">
+      <div class="text-5xl mb-4">🗺️</div>
+      <h2 class="text-lg font-bold mb-2 grad">Your Roadmap Awaits</h2>
+      <p class="text-slate-500 text-sm text-center max-w-sm">Enter your dream role and click <strong class="text-slate-300">Generate Roadmap</strong>. Click any skill node to get AI-powered advice, projects, and interview prep.</p>
+    </div>
+    <!-- Loading overlay -->
+    <div id="loader" class="hidden absolute inset-0 z-20 flex flex-col items-center justify-center" style="background:rgba(10,15,30,0.92)">
+      <div class="w-10 h-10 rounded-full border-2 border-sky-500 border-t-transparent spinner mb-4"></div>
+      <p class="text-white font-semibold">Reverse-engineering your career path...</p>
+      <p class="text-slate-500 text-sm mt-1">Powered by Gemini 3.5 Flash</p>
+    </div>
+  </div>
+
+  <!-- Advice Panel -->
+  <div id="panel" class="hidden flex-shrink-0 w-[380px] border-l border-slate-800 bg-slate-950 flex flex-col overflow-hidden">
+    <div class="flex-shrink-0 px-4 pt-4 pb-0 border-b border-slate-800">
+      <div class="flex justify-between items-start mb-2">
+        <div>
+          <p id="panelPhase" class="text-xs text-violet-400 font-medium"></p>
+          <h3 id="panelTitle" class="font-bold text-base text-white mt-0.5"></h3>
+        </div>
+        <button onclick="closePanel()" class="text-slate-500 hover:text-white text-xl leading-none mt-1">&times;</button>
+      </div>
+      <div id="panelLoader" class="py-6 flex flex-col items-center gap-3">
+        <div class="w-7 h-7 rounded-full border-2 border-sky-400 border-t-transparent spinner"></div>
+        <p class="text-slate-500 text-sm">Generating advice...</p>
+      </div>
+      <!-- Tabs -->
+      <div id="panelTabs" class="hidden flex gap-1 text-xs font-medium -mb-px">
+        <button class="tab-active px-3 py-2" onclick="tab('advice')">Advice</button>
+        <button class="tab-inactive px-3 py-2" onclick="tab('project')">Project</button>
+        <button class="tab-inactive px-3 py-2" onclick="tab('resources')">Resources</button>
+        <button class="tab-inactive px-3 py-2" onclick="tab('interview')">Interview</button>
+        <button class="tab-inactive px-3 py-2" onclick="tab('paths')">Real Paths</button>
+      </div>
+    </div>
+
+    <div id="panelBody" class="hidden flex-1 overflow-y-auto">
+      <!-- Advice tab -->
+      <div id="t-advice" class="p-4 space-y-3">
+        <div class="p-3 rounded-xl bg-slate-900 border border-slate-800">
+          <p id="adviceTxt" class="text-sm text-slate-300 leading-relaxed"></p>
+        </div>
+        <div class="p-3 rounded-xl bg-amber-950/30 border border-amber-900/40">
+          <p class="text-xs font-semibold text-amber-400 mb-1">Common Mistake</p>
+          <p id="mistakeTxt" class="text-xs text-amber-200/70 leading-relaxed"></p>
+        </div>
+      </div>
+      <!-- Project tab -->
+      <div id="t-project" class="p-4 space-y-3 hidden">
+        <div class="p-3 rounded-xl bg-slate-900 border border-slate-800">
+          <h4 id="projTitle" class="font-semibold text-sky-400 mb-2 text-sm"></h4>
+          <p id="projDesc" class="text-sm text-slate-300 leading-relaxed mb-3"></p>
+          <p class="text-xs text-violet-400 font-medium">GitHub inspiration: <span id="projGH" class="font-normal text-slate-400"></span></p>
+        </div>
+      </div>
+      <!-- Resources tab -->
+      <div id="t-resources" class="p-4 space-y-2 hidden">
+        <div id="resourcesList"></div>
+      </div>
+      <!-- Interview tab -->
+      <div id="t-interview" class="p-4 space-y-2 hidden">
+        <div id="interviewList"></div>
+      </div>
+      <!-- Paths tab -->
+      <div id="t-paths" class="p-4 space-y-3 hidden">
+        <p class="text-xs text-slate-500 mb-2">People who walked this phase:</p>
+        <div id="pathsList"></div>
+        <div id="sideProjectsList" class="mt-3 space-y-2"></div>
+      </div>
+    </div>
+
+    <div id="panelActions" class="hidden flex-shrink-0 border-t border-slate-800 p-3 space-y-2">
+      <button id="btnComplete" onclick="markDone()"
+        class="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition"
+        style="background:#16a34a">
+        Mark as Completed
+      </button>
+      <button onclick="markKnown()"
+        class="w-full py-2.5 rounded-xl text-sm font-medium text-slate-400 border border-slate-700 hover:border-slate-600 hover:text-white transition">
+        I already know this - Re-plan
+      </button>
+    </div>
+  </div>
+</main>
+
+<!-- Bottom info bar -->
+<div id="infoBar" class="hidden flex-shrink-0 border-t border-slate-800 bg-slate-950 px-4 py-2 flex items-center gap-6 text-xs overflow-x-auto">
+  <div><span class="text-slate-500">Goal:</span> <span id="ibJob" class="text-white font-medium ml-1"></span></div>
+  <div><span class="text-slate-500">Overview:</span> <span id="ibOverview" class="text-slate-300 ml-1"></span></div>
+  <div class="ml-auto flex gap-6 flex-shrink-0">
+    <div><span class="text-slate-500">Salary:</span> <span id="ibSalary" class="text-emerald-400 font-semibold ml-1"></span></div>
+    <div><span class="text-slate-500">Companies:</span> <span id="ibCompanies" class="text-sky-400 ml-1"></span></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-5 right-5 z-50 hidden bounce-in">
+  <div class="bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 flex items-center gap-3 shadow-2xl">
+    <span id="toastMsg" class="text-sm font-medium"></span>
+  </div>
+</div>
+
+<!-- Compare Modal -->
+<div id="compareModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,0.8)">
+  <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl">
+    <div class="p-5 border-b border-slate-800 flex justify-between items-center">
+      <div>
+        <h2 class="font-bold text-lg">Compare Two Roles</h2>
+        <p class="text-slate-500 text-sm">See shared skills and where paths diverge</p>
+      </div>
+      <button onclick="closeCompare()" class="text-slate-500 hover:text-white text-2xl">&times;</button>
+    </div>
+    <div class="p-5 border-b border-slate-800 flex gap-3">
+      <input id="cmpA" type="text" placeholder="Role A (e.g. Frontend Engineer)"
+        class="flex-1 bg-slate-800 border border-slate-700 px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"/>
+      <input id="cmpB" type="text" placeholder="Role B (e.g. UI/UX Designer)"
+        class="flex-1 bg-slate-800 border border-slate-700 px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"/>
+      <button onclick="runCompare()" class="px-4 py-2 rounded-lg text-sm font-semibold text-white" style="background:linear-gradient(135deg,#0ea5e9,#7c3aed)">Compare</button>
+    </div>
+    <div id="cmpBody" class="flex-1 overflow-y-auto p-5">
+      <p class="text-center text-slate-600 text-sm">Enter two roles above to compare them.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State
+var NET = null, NDS = null, NES = null;
+var roadmapData = null, jobTitle = "";
+var known = [], done = [], selSkill = null, selPhase = null;
+
+// ── Toast
+function toast(msg, ms) {
+  ms = ms || 3000;
+  var el = document.getElementById('toast');
+  document.getElementById('toastMsg').innerText = msg;
+  el.classList.remove('hidden');
+  setTimeout(function(){ el.classList.add('hidden'); }, ms);
+}
+
+// ── Confetti
+function confetti() {
+  var colors = ['#38bdf8','#818cf8','#a78bfa','#34d399','#fb923c'];
+  for (var i = 0; i < 50; i++) {
+    (function(i) {
+      setTimeout(function() {
+        var el = document.createElement('div');
+        el.className = 'confetti-piece';
+        el.style.left = Math.random()*100 + 'vw';
+        el.style.top = '-10px';
+        el.style.width = (6 + Math.random()*8) + 'px';
+        el.style.height = (6 + Math.random()*8) + 'px';
+        el.style.background = colors[Math.floor(Math.random()*colors.length)];
+        el.style.animationDelay = Math.random()*1.5 + 's';
+        el.style.animationDuration = (2 + Math.random()*2) + 's';
+        document.body.appendChild(el);
+        setTimeout(function(){ el.remove(); }, 5000);
+      }, i * 30);
+    })(i);
+  }
+}
+
+// ── Generate
+function generate() {
+  var jt = document.getElementById('jobInput').value.trim();
+  if (!jt) { toast('Please enter a job title'); return; }
+  jobTitle = jt;
+
+  document.getElementById('loader').classList.remove('hidden');
+  document.getElementById('emptyState').classList.add('hidden');
+  closePanel();
+
+  var payload = {
+    job_title: jt,
+    timeframe: document.getElementById('tfInput').value,
+    hours_per_week: document.getElementById('hrsInput').value,
+    current_role: document.getElementById('bgInput').value.trim(),
+    known_skills: known
+  };
+
+  fetch('/api/generate', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    document.getElementById('loader').classList.add('hidden');
+    if (data.error) { toast('Error: ' + data.error, 6000); return; }
+    roadmapData = data;
+    renderGraph(data);
+    toast('Roadmap ready! Click any skill node for advice.');
+  })
+  .catch(function(err) {
+    document.getElementById('loader').classList.add('hidden');
+    toast('Network error: ' + err.message, 6000);
+    document.getElementById('emptyState').classList.remove('hidden');
+  });
+}
+
+// Enter key
+document.getElementById('jobInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') generate();
+});
+
+// ── Render graph
+function renderGraph(data) {
+  var nodes = [], edges = [];
+  var PC = [
+    {bg:'#0e4166', bd:'#0284c7'},
+    {bg:'#134e3a', bd:'#059669'},
+    {bg:'#3b1f6e', bd:'#7c3aed'},
+    {bg:'#7c2d12', bd:'#ea580c'}
+  ];
+
+  nodes.push({
+    id: '__goal__',
+    label: data.job,
+    shape: 'box', margin: 14,
+    color: {background:'#7c3aed', border:'#6d28d9', highlight:{background:'#8b5cf6',border:'#7c3aed'}},
+    font: {color:'#fff', bold:true, size:15},
+    level: 4, isGoal: true
+  });
+
+  (data.phases || []).forEach(function(phase, pi) {
+    var pid = '__phase__' + pi;
+    var pc = PC[pi % PC.length];
+    nodes.push({
+      id: pid,
+      label: 'Phase ' + (pi+1) + ': ' + phase.phase_name + '\n' + (phase.estimated_time || ''),
+      shape: 'box', margin: 10,
+      color: {background:pc.bg, border:pc.bd, highlight:{background:pc.bd,border:pc.bd}},
+      font: {color:'#e2e8f0', size:13, multi:'html'},
+      level: 3, isPhase: true, phaseIdx: pi
+    });
+    edges.push({from:pid, to:'__goal__', arrows:'to', color:{color:'#334155'}, width:2});
+
+    (phase.skills_to_learn || []).forEach(function(skill, si) {
+      var sid = pid + '__s' + si;
+      var isDone = done.indexOf(skill) !== -1;
+      var isKnown = known.indexOf(skill) !== -1;
+      nodes.push({
+        id: sid, skillName: skill,
+        label: isDone ? 'OK ' + skill : skill,
+        shape: 'box', margin: 8,
+        color: isDone
+          ? {background:'#14532d', border:'#16a34a', highlight:{background:'#166534',border:'#22c55e'}}
+          : isKnown
+          ? {background:'#374151', border:'#4b5563', highlight:{background:'#4b5563',border:'#6b7280'}}
+          : {background:'#1e293b', border:'#334155', highlight:{background:'#273548',border:'#38bdf8'}},
+        font: {color: isDone ? '#86efac' : isKnown ? '#9ca3af' : '#cbd5e1', size:11},
+        level: 2, isSkill: true, phaseIdx: pi
+      });
+      edges.push({from:sid, to:pid, arrows:'to', color:{color:'#1e293b'}, width:1});
+    });
+  });
+
+  var container = document.getElementById('network');
+  NDS = new vis.DataSet(nodes);
+  NES = new vis.DataSet(edges);
+
+  var opts = {
+    layout: {
+      hierarchical: {
+        direction: 'LR', sortMethod:'directed',
+        levelSeparation: 280, nodeSpacing: 70, treeSpacing: 100
+      }
+    },
+    physics: false,
+    interaction: {hover:true, zoomView:true, dragView:true},
+    nodes: {
+      borderWidth: 1.5, borderWidthSelected: 2.5,
+      shadow: {enabled:true, color:'rgba(0,0,0,0.5)', size:10, x:3, y:3}
+    },
+    edges: {smooth: {type:'cubicBezier', forceDirection:'horizontal'}}
+  };
+
+  if (NET) NET.destroy();
+  NET = new vis.Network(container, {nodes:NDS, edges:NES}, opts);
+
+  NET.on('click', function(p) {
+    if (!p.nodes.length) return;
+    var n = NDS.get(p.nodes[0]);
+    if (n && n.isSkill) openPanel(n);
+  });
+
+  // Bottom bar
+  document.getElementById('ibJob').innerText = data.job;
+  document.getElementById('ibOverview').innerText = data.overview || '';
+  document.getElementById('ibSalary').innerText = data.salary_range || '-';
+  document.getElementById('ibCompanies').innerText = (data.top_companies || []).slice(0,3).join(', ');
+  document.getElementById('infoBar').classList.remove('hidden');
+  updateProgress();
+}
+
+// ── Progress
+function updateProgress() {
+  if (!NDS) return;
+  var all = NDS.get({filter: function(n){ return n.isSkill; }});
+  var total = all.length, comp = done.length;
+  var pct = total ? Math.round(comp/total*100) : 0;
+  document.getElementById('progText').innerText = comp + ' / ' + total + ' completed';
+  document.getElementById('progBar').style.width = pct + '%';
+  document.getElementById('progressWrap').classList.remove('hidden');
+  if (total > 0 && comp === total) {
+    confetti();
+    toast('Roadmap complete! You are ready to apply!', 5000);
+  }
+}
+
+// ── Open advice panel
+function openPanel(node) {
+  selSkill = node.skillName;
+  selPhase = roadmapData ? roadmapData.phases[node.phaseIdx] : null;
+
+  document.getElementById('panel').classList.remove('hidden');
+  document.getElementById('panelPhase').innerText = selPhase ? selPhase.phase_name : '';
+  document.getElementById('panelTitle').innerText = node.skillName;
+  document.getElementById('panelLoader').classList.remove('hidden');
+  document.getElementById('panelTabs').classList.add('hidden');
+  document.getElementById('panelBody').classList.add('hidden');
+  document.getElementById('panelActions').classList.add('hidden');
+  tab('advice');
+
+  fetch('/api/advice', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      skill: node.skillName,
+      job_title: jobTitle,
+      phase: selPhase ? selPhase.phase_name : ''
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d) {
+    if (d.error) throw new Error(d.error);
+
+    var proj = d.project_idea || {};
+    document.getElementById('adviceTxt').innerText = d.advice || '';
+    document.getElementById('mistakeTxt').innerText = d.common_mistakes || '';
+    document.getElementById('projTitle').innerText = proj.title || '';
+    document.getElementById('projDesc').innerText = proj.description || '';
+    document.getElementById('projGH').innerText = proj.github_inspiration || '';
+
+    var rl = document.getElementById('resourcesList');
+    rl.innerHTML = '';
+    (d.resources || []).forEach(function(r) {
+      rl.innerHTML += '<div class="p-3 rounded-xl bg-slate-900 border border-slate-800 mb-2"><span class="text-xs px-2 py-0.5 rounded bg-sky-900/40 text-sky-300 font-medium mr-2">' + (r.type||'') + '</span><span class="text-sm text-slate-200">' + (r.name||'') + '</span><p class="text-xs text-slate-500 mt-1 ml-1">' + (r.url_hint||'') + '</p></div>';
+    });
+
+    var il = document.getElementById('interviewList');
+    il.innerHTML = '';
+    var badges = ['FAANG','Mid-level','Startup'];
+    (d.interview_questions || []).forEach(function(q, i) {
+      il.innerHTML += '<div class="p-3 rounded-xl bg-slate-900 border border-slate-800 mb-2"><span class="text-xs px-1.5 py-0.5 rounded bg-violet-900/40 text-violet-300 mb-1.5 inline-block">' + (badges[i]||'Q'+(i+1)) + '</span><p class="text-sm text-slate-300">' + q + '</p></div>';
+    });
+
+    var pl = document.getElementById('pathsList');
+    pl.innerHTML = '';
+    var people = selPhase ? (selPhase.people_who_took_this_path || []) : [];
+    people.forEach(function(p) {
+      pl.innerHTML += '<div class="p-3 rounded-xl bg-slate-900 border border-slate-800 mb-2"><p class="text-sm font-medium">' + p.role + '</p><p class="text-xs text-slate-500 mt-0.5">' + p.company_type + ' &bull; ' + p.duration + '</p></div>';
+    });
+    if (!people.length) pl.innerHTML = '<p class="text-xs text-slate-600">No path data for this phase.</p>';
+
+    var sl = document.getElementById('sideProjectsList');
+    sl.innerHTML = '';
+    (selPhase ? (selPhase.side_projects || []) : []).forEach(function(sp) {
+      sl.innerHTML += '<div class="p-3 rounded-xl border border-violet-900/40 mb-2" style="background:rgba(124,58,237,0.08)"><p class="text-xs font-semibold text-violet-400 mb-1">' + sp.title + '</p><p class="text-xs text-slate-400">' + sp.description + '</p></div>';
+    });
+
+    document.getElementById('panelLoader').classList.add('hidden');
+    document.getElementById('panelTabs').classList.remove('hidden');
+    document.getElementById('panelBody').classList.remove('hidden');
+    document.getElementById('panelActions').classList.remove('hidden');
+
+    var bc = document.getElementById('btnComplete');
+    if (done.indexOf(selSkill) !== -1) {
+      bc.style.background = '#334155';
+      bc.innerText = 'Completed';
+    } else {
+      bc.style.background = '#16a34a';
+      bc.innerText = 'Mark as Completed';
+    }
+  })
+  .catch(function(err) {
+    document.getElementById('panelLoader').classList.add('hidden');
+    document.getElementById('adviceTxt').innerText = 'Could not load advice: ' + err.message;
+    document.getElementById('panelTabs').classList.remove('hidden');
+    document.getElementById('panelBody').classList.remove('hidden');
+  });
+}
+
+function closePanel() { document.getElementById('panel').classList.add('hidden'); }
+
+// ── Tabs
+var TABS = ['advice','project','resources','interview','paths'];
+function tab(name) {
+  TABS.forEach(function(t) {
+    document.getElementById('t-' + t).classList.toggle('hidden', t !== name);
+  });
+  document.querySelectorAll('#panelTabs button').forEach(function(btn, i) {
+    var isActive = TABS[i] === name;
+    btn.className = isActive ? 'tab-active px-3 py-2 text-xs font-medium' : 'tab-inactive px-3 py-2 text-xs font-medium';
+  });
+}
+
+// ── Mark done/known
+function markDone() {
+  if (!selSkill || done.indexOf(selSkill) !== -1) return;
+  done.push(selSkill);
+  var nodes = NDS.get({filter: function(n){ return n.skillName === selSkill; }});
+  nodes.forEach(function(n) {
+    NDS.update({id:n.id, label:'OK ' + n.skillName,
+      color:{background:'#14532d',border:'#16a34a',highlight:{background:'#166534',border:'#22c55e'}},
+      font:{color:'#86efac',size:11}
+    });
+  });
+  updateProgress();
+  confetti();
+  toast('"' + selSkill + '" completed!');
+  closePanel();
+}
+
+function markKnown() {
+  if (!selSkill || known.indexOf(selSkill) !== -1) return;
+  known.push(selSkill);
+  toast('Re-planning without "' + selSkill + '"...');
+  closePanel();
+  generate();
+}
+
+// ── Export
+function exportPNG() {
+  if (!NET) { toast('Generate a roadmap first'); return; }
+  var canvas = document.querySelector('#network canvas');
+  if (!canvas) { toast('Canvas not found'); return; }
+  var a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = 'career-roadmap.png';
+  a.click();
+  toast('Roadmap exported as PNG');
+}
+
+// ── Share
+function shareMap() {
+  if (!roadmapData) { toast('Generate a roadmap first'); return; }
+  fetch('/api/share', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({roadmap: roadmapData})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d) {
+    if (d.error) { toast('Share failed: ' + d.error); return; }
+    var url = window.location.origin + d.url;
+    navigator.clipboard.writeText(url).then(function() {
+      toast('Share link copied to clipboard!');
+    }).catch(function() {
+      toast('Link: ' + url, 6000);
+    });
+  })
+  .catch(function(err){ toast('Share error: ' + err.message); });
+}
+
+// ── Compare
+function openCompare() { document.getElementById('compareModal').classList.remove('hidden'); }
+function closeCompare() { document.getElementById('compareModal').classList.add('hidden'); }
+
+function runCompare() {
+  var a = document.getElementById('cmpA').value.trim();
+  var b = document.getElementById('cmpB').value.trim();
+  if (!a || !b) { toast('Enter both roles'); return; }
+  var body = document.getElementById('cmpBody');
+  body.innerHTML = '<div class="flex justify-center py-8"><div class="w-7 h-7 rounded-full border-2 border-sky-400 border-t-transparent spinner"></div></div>';
+
+  fetch('/api/compare', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({role_a:a, role_b:b})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d) {
+    if (d.error) throw new Error(d.error);
+    var shared = (d.shared_skills||[]).map(function(s){ return '<span class="inline-block px-2 py-0.5 rounded-full text-xs bg-violet-900/30 text-violet-300 border border-violet-800/50 mr-1 mb-1">'+s+'</span>'; }).join('');
+    var ua = (d.unique_to_a||[]).map(function(s){ return '<span class="inline-block px-2 py-0.5 rounded-full text-xs bg-sky-900/30 text-sky-300 border border-sky-800/50 mr-1 mb-1">'+s+'</span>'; }).join('');
+    var ub = (d.unique_to_b||[]).map(function(s){ return '<span class="inline-block px-2 py-0.5 rounded-full text-xs bg-orange-900/30 text-orange-300 border border-orange-800/50 mr-1 mb-1">'+s+'</span>'; }).join('');
+    body.innerHTML = '<div class="grid grid-cols-3 gap-3 mb-4">'
+      + '<div class="p-3 rounded-xl bg-sky-950/40 border border-sky-900/50 text-center"><p class="text-xs text-sky-400 font-medium mb-1">'+d.role_a+'</p><p class="text-lg font-bold">'+d.salary_a+'</p><p class="text-xs text-slate-500 mt-1">'+d.time_to_hire_a+'</p></div>'
+      + '<div class="p-3 rounded-xl bg-violet-950/40 border border-violet-900/50 text-center"><p class="text-xs text-violet-400 font-medium mb-1">Shared Skills</p><p class="text-2xl font-black">'+(d.shared_skills||[]).length+'</p></div>'
+      + '<div class="p-3 rounded-xl bg-orange-950/40 border border-orange-900/50 text-center"><p class="text-xs text-orange-400 font-medium mb-1">'+d.role_b+'</p><p class="text-lg font-bold">'+d.salary_b+'</p><p class="text-xs text-slate-500 mt-1">'+d.time_to_hire_b+'</p></div>'
+      + '</div>'
+      + '<div class="grid grid-cols-3 gap-3 mb-4"><div><p class="text-xs text-sky-400 font-medium mb-2">Only in ' + d.role_a + '</p><div>'+ua+'</div></div><div><p class="text-xs text-violet-400 font-medium mb-2">Shared</p><div>'+shared+'</div></div><div><p class="text-xs text-orange-400 font-medium mb-2">Only in ' + d.role_b + '</p><div>'+ub+'</div></div></div>'
+      + '<div class="p-3 rounded-xl bg-slate-900 border border-slate-800 mb-3"><p class="text-xs font-semibold text-emerald-400 mb-1">Verdict</p><p class="text-sm text-slate-300">'+d.verdict+'</p></div>'
+      + '<div class="p-3 rounded-xl bg-slate-900 border border-slate-800"><p class="text-xs font-semibold text-amber-400 mb-1">Switchability</p><p class="text-sm text-slate-300">'+d.switchability+'</p></div>';
+  })
+  .catch(function(err) {
+    body.innerHTML = '<p class="text-red-400 text-sm">' + err.message + '</p>';
+  });
+}
+</script>
+</body>
+</html>
